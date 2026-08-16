@@ -35,6 +35,45 @@ describe("client configuration", () => {
     expect(stub.calls[0]?.url).toBe(`http://localhost:3001/staging/v1/vehicles/vin/${VIN}`);
   });
 
+  it.each([
+    "http://api.vehicles.dev",
+    "http://example.com:3000",
+    "http://10.0.0.1",
+    "http://127.example.com",
+    "http://[::2]"
+  ])("rejects plaintext HTTP for a non-loopback base URL: %s", (baseUrl) => {
+    expect(() => new Vehicles({ apiKey: API_KEY, baseUrl })).toThrow(
+      /HTTPS unless it targets a loopback host/u
+    );
+  });
+
+  it.each([
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://127.42.0.9:3001",
+    "http://[::1]:3001"
+  ])("allows plaintext HTTP for explicit local development on %s", async (baseUrl) => {
+    const stub = successfulFetch();
+    const client = new Vehicles({ apiKey: API_KEY, baseUrl, fetch: stub.fetch });
+
+    await client.decodeVin(VIN);
+
+    expect(new URL(stub.calls[0]?.url ?? "").protocol).toBe("http:");
+  });
+
+  it("allows HTTPS for a non-loopback base URL", async () => {
+    const stub = successfulFetch();
+    const client = new Vehicles({
+      apiKey: API_KEY,
+      baseUrl: "https://staging-api.example.com/root/",
+      fetch: stub.fetch
+    });
+
+    await client.decodeVin(VIN);
+
+    expect(stub.calls[0]?.url).toBe(`https://staging-api.example.com/root/v1/vehicles/vin/${VIN}`);
+  });
+
   it.each([0, -1, 1.5, Number.POSITIVE_INFINITY])("rejects invalid timeout %j", (timeoutMs) => {
     expect(() => new Vehicles({ apiKey: API_KEY, timeoutMs })).toThrow(/positive integer/u);
   });

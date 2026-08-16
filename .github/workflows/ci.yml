@@ -29,3 +29,5 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm pack --dry-run
+      - if: matrix.node == 26
+        run: pnpm smoke:git-install

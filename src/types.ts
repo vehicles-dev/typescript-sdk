@@ -13,7 +13,7 @@ export interface RequestOptions {
 export interface VehiclesOptions {
   /** Vehicles.dev API key. Keep it in a server-side secret store. */
   readonly apiKey: string;
-  /** Absolute HTTP(S) API base URL. Defaults to https://api.vehicles.dev. */
+  /** HTTPS API base URL. Defaults to https://api.vehicles.dev; HTTP is loopback-only. */
   readonly baseUrl?: string;
   /** Fetch implementation used for requests. Defaults to the Node.js global fetch. */
   readonly fetch?: typeof globalThis.fetch;
@@ -72,11 +72,6 @@ export interface OwnershipCostsParams {
   readonly year: number;
 }
 
-export interface CompositeReportParams {
-  readonly miles?: number;
-  readonly state?: string;
-}
-
 export interface VinDecodeResult {
   readonly origin: "store" | "vpic";
   readonly source: "carscrape";
@@ -118,19 +113,6 @@ export interface VehicleListings {
   readonly total: number;
 }
 
-export interface VehicleListingHistory {
-  readonly currentPrice: number | null;
-  readonly currentlyActive: boolean;
-  readonly firstSeen: string;
-  readonly lastSeen: string;
-  readonly observations: JsonObject[];
-  readonly priceChanges: number;
-  readonly priceMax: number | null;
-  readonly priceMin: number | null;
-  readonly source: "carscrape";
-  readonly vin: string;
-}
-
 export interface VehicleMarketValue {
   readonly currency: string;
   readonly estimateUsd: number;
@@ -161,17 +143,6 @@ export interface VehicleOwnershipCosts {
   readonly source: "carscrape";
   readonly trimsAvailable: number;
   readonly year: number;
-}
-
-export interface VehicleCompositeReport {
-  readonly coverage: string[];
-  readonly depreciation: JsonObject | null;
-  readonly generatedAt: string;
-  readonly identity: JsonObject;
-  readonly marketValue: JsonObject | null;
-  readonly origin: "store" | "vpic";
-  readonly source: "carscrape";
-  readonly vin: string;
 }
 
 export type VehicleHistoryReportStatus =

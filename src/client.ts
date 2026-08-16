@@ -1,6 +1,5 @@
 import { VehiclesError, type VehiclesErrorOptions } from "./errors.js";
 import type {
-  CompositeReportParams,
   CreateVehicleHistoryReportParams,
   CreatedVehicleHistoryReport,
   DepreciationParams,
@@ -10,11 +9,9 @@ import type {
   OwnershipCostsParams,
   RequestOptions,
   SearchListingsParams,
-  VehicleCompositeReport,
   VehicleDepreciation,
   VehicleHistoryReport,
   VehicleHistoryReportResult,
-  VehicleListingHistory,
   VehicleListings,
   VehicleMarketValue,
   VehicleOwnershipCosts,
@@ -41,6 +38,7 @@ interface TransportRequest {
   readonly options?: RequestOptions | undefined;
   readonly path: string;
   readonly query?: Readonly<Record<string, QueryValue>> | undefined;
+  readonly timeoutCapMs?: number | undefined;
 }
 
 interface TransportResponse<T> {
@@ -89,6 +87,12 @@ function parseRetryAfter(value: string | null): number | null {
   return Math.max(0, Math.ceil((date - Date.now()) / 1_000));
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" || hostname === "[::1]" || /^127(?:\.[0-9]{1,3}){3}$/u.test(hostname)
+  );
+}
+
 function normalizeBaseUrl(raw: string | undefined): string {
   const value = raw ?? DEFAULT_BASE_URL;
   let parsed: URL;
@@ -100,6 +104,9 @@ function normalizeBaseUrl(raw: string | undefined): string {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     throw new TypeError("baseUrl must be an absolute HTTP(S) URL");
   }
+  if (parsed.protocol === "http:" && !isLoopbackHostname(parsed.hostname)) {
+    throw new TypeError("baseUrl must use HTTPS unless it targets a loopback host");
+  }
   return parsed.origin + parsed.pathname.replace(/\/+$/u, "");
 }
 
@@ -109,6 +116,12 @@ function normalizeTimeout(value: number | undefined, fallback: number): number {
     throw new TypeError("timeoutMs must be a positive integer");
   }
   return timeoutMs;
+}
+
+function monotonicNow(): number {
+  return typeof globalThis.performance?.now === "function"
+    ? globalThis.performance.now()
+    : Date.now();
 }
 
 function normalizeVin(vin: string): string {
@@ -154,6 +167,14 @@ function localError(
     status: null,
     type: null
   });
+}
+
+function reportWaitTimeout(maxWaitMs: number): VehiclesError {
+  return localError(
+    "report_wait_timeout",
+    `The vehicle history report did not complete within ${maxWaitMs} ms.`,
+    true
+  );
 }
 
 function sleep(milliseconds: number, signal?: AbortSignal): Promise<void> {
@@ -210,18 +231,36 @@ class HistoryReportsClient implements HistoryReports {
   }
 
   getStatus(id: string, options?: RequestOptions): Promise<VehicleHistoryReport> {
+    return this.#getStatus(id, options);
+  }
+
+  #getStatus(
+    id: string,
+    options: RequestOptions | undefined,
+    timeoutCapMs?: number
+  ): Promise<VehicleHistoryReport> {
     return this.#request<VehicleHistoryReport>({
       method: "GET",
       options,
-      path: reportPath(id)
+      path: reportPath(id),
+      timeoutCapMs
     }).then(({ data, retryAfterSeconds }) => withRetryAfter(data, retryAfterSeconds));
   }
 
   getResult(id: string, options?: RequestOptions): Promise<VehicleHistoryReportResult> {
+    return this.#getResult(id, options);
+  }
+
+  #getResult(
+    id: string,
+    options: RequestOptions | undefined,
+    timeoutCapMs?: number
+  ): Promise<VehicleHistoryReportResult> {
     return this.#request<VehicleHistoryReportResult>({
       method: "GET",
       options,
-      path: reportPath(id, "/result")
+      path: reportPath(id, "/result"),
+      timeoutCapMs
     }).then(({ data }) => data);
   }
 
@@ -246,21 +285,19 @@ class HistoryReportsClient implements HistoryReports {
     pollIntervalMs: number | undefined,
     signal: AbortSignal | undefined
   ): Promise<VehicleHistoryReportResult> {
-    const startedAt = Date.now();
+    const startedAt = monotonicNow();
     for (;;) {
       if (signal?.aborted) {
         throw localError("request_aborted", "The report wait was aborted.", false);
       }
-      if (Date.now() - startedAt >= maxWaitMs) {
-        throw localError(
-          "report_wait_timeout",
-          `The vehicle history report did not complete within ${maxWaitMs} ms.`,
-          true
-        );
-      }
 
       const requestOptions = signal === undefined ? undefined : { signal };
-      const report = await this.getStatus(id, requestOptions);
+      const report = await this.#requestWithinDeadline(
+        (timeoutCapMs) => this.#getStatus(id, requestOptions, timeoutCapMs),
+        startedAt,
+        maxWaitMs,
+        signal
+      );
       if (report.status === "action_required") {
         throw localError(
           "report_action_required",
@@ -277,7 +314,12 @@ class HistoryReportsClient implements HistoryReports {
           );
         }
         try {
-          return await this.getResult(id, requestOptions);
+          return await this.#requestWithinDeadline(
+            (timeoutCapMs) => this.#getResult(id, requestOptions, timeoutCapMs),
+            startedAt,
+            maxWaitMs,
+            signal
+          );
         } catch (error) {
           if (
             !(error instanceof VehiclesError) ||
@@ -309,20 +351,37 @@ class HistoryReportsClient implements HistoryReports {
     }
   }
 
+  async #requestWithinDeadline<T>(
+    request: (timeoutCapMs: number) => Promise<T>,
+    startedAt: number,
+    maxWaitMs: number,
+    signal: AbortSignal | undefined
+  ): Promise<T> {
+    const timeoutCapMs = this.#remainingTimeoutMs(startedAt, maxWaitMs);
+    try {
+      const result = await request(timeoutCapMs);
+      if (monotonicNow() - startedAt >= maxWaitMs) throw reportWaitTimeout(maxWaitMs);
+      return result;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (monotonicNow() - startedAt >= maxWaitMs) throw reportWaitTimeout(maxWaitMs);
+      throw error;
+    }
+  }
+
+  #remainingTimeoutMs(startedAt: number, maxWaitMs: number): number {
+    const remainingMs = maxWaitMs - (monotonicNow() - startedAt);
+    if (remainingMs <= 0) throw reportWaitTimeout(maxWaitMs);
+    return Math.max(1, Math.ceil(remainingMs));
+  }
+
   async #sleepWithinDeadline(
     requestedDelayMs: number,
     startedAt: number,
     maxWaitMs: number,
     signal: AbortSignal | undefined
   ): Promise<void> {
-    const remainingMs = maxWaitMs - (Date.now() - startedAt);
-    if (remainingMs <= 0) {
-      throw localError(
-        "report_wait_timeout",
-        `The vehicle history report did not complete within ${maxWaitMs} ms.`,
-        true
-      );
-    }
+    const remainingMs = this.#remainingTimeoutMs(startedAt, maxWaitMs);
     await sleep(Math.min(requestedDelayMs, remainingMs), signal);
   }
 }
@@ -396,10 +455,6 @@ export class Vehicles {
     );
   }
 
-  getListingHistory(vin: string, options?: RequestOptions): Promise<VehicleListingHistory> {
-    return this.#get(vinPath("history", vin), undefined, options);
-  }
-
   getMarketValue(params: MarketValueParams, options?: RequestOptions): Promise<VehicleMarketValue> {
     return this.#get(
       "/v1/vehicles/market-value",
@@ -444,14 +499,6 @@ export class Vehicles {
     );
   }
 
-  getCompositeReport(
-    vin: string,
-    params: CompositeReportParams = {},
-    options?: RequestOptions
-  ): Promise<VehicleCompositeReport> {
-    return this.#get(vinPath("report", vin), { miles: params.miles, state: params.state }, options);
-  }
-
   #get<T>(
     path: string,
     query: Readonly<Record<string, QueryValue>> | undefined,
@@ -461,7 +508,11 @@ export class Vehicles {
   }
 
   #request<T>(request: TransportRequest): Promise<TransportResponse<T>> {
-    const timeoutMs = normalizeTimeout(request.options?.timeoutMs, this.#timeoutMs);
+    const requestedTimeoutMs = normalizeTimeout(request.options?.timeoutMs, this.#timeoutMs);
+    const timeoutMs =
+      request.timeoutCapMs === undefined
+        ? requestedTimeoutMs
+        : Math.min(requestedTimeoutMs, normalizeTimeout(request.timeoutCapMs, requestedTimeoutMs));
     return this.#execute<T>(request, timeoutMs);
   }
 

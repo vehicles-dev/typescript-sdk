@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- The dependency-free, server-side `Vehicles` client and ten vehicle-data operations.
+- The dependency-free, server-side `Vehicles` client and eight immediate-response vehicle-data operations.
 - Durable vehicle-history report creation, explicit submission retry, status, result, and polling
   helpers.
 - RFC 9457 `VehiclesError` mapping, request cancellation, per-call timeouts, and API-key redaction.

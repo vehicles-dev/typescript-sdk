@@ -30,6 +30,16 @@ function report(
   };
 }
 
+function waitForAbort(signal: AbortSignal | null | undefined): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+}
+
 afterEach(() => {
   vi.useRealTimers();
 });
@@ -202,6 +212,84 @@ describe("waitForResult", () => {
     expect(error).toBeInstanceOf(VehiclesError);
     expect(error).toMatchObject({ code: "invalid_report_state", retryable: false, status: null });
     expect(stub.calls).toHaveLength(1);
+  });
+
+  it("rejects an unknown report status as an invalid local state", async () => {
+    const unknownStatus = {
+      ...report("queued"),
+      status: "provider_mystery"
+    } as unknown as VehicleHistoryReport;
+    const stub = fetchSequence(jsonResponse(unknownStatus));
+    const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
+
+    await expect(client.historyReports.waitForResult(REPORT_ID)).rejects.toMatchObject({
+      code: "invalid_report_state",
+      retryable: false,
+      status: null
+    });
+    expect(stub.calls).toHaveLength(1);
+  });
+
+  it("enforces maxWaitMs while a status request is stalled", async () => {
+    vi.useFakeTimers();
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) =>
+      waitForAbort(init?.signal)
+    );
+    const client = new Vehicles({ apiKey: API_KEY, fetch, timeoutMs: 5_000 });
+
+    const outcome = client.historyReports.waitForResult(REPORT_ID, { maxWaitMs: 1_000 });
+    const assertion = expect(outcome).rejects.toMatchObject({
+      code: "report_wait_timeout",
+      retryable: true,
+      status: null
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await assertion;
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("enforces maxWaitMs while a completed report result request is stalled", async () => {
+    vi.useFakeTimers();
+    let callCount = 0;
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) => {
+      callCount += 1;
+      if (callCount === 1) return jsonResponse(report("completed"));
+      return waitForAbort(init?.signal);
+    });
+    const client = new Vehicles({ apiKey: API_KEY, fetch, timeoutMs: 5_000 });
+
+    const outcome = client.historyReports.waitForResult(REPORT_ID, { maxWaitMs: 1_000 });
+    const assertion = expect(outcome).rejects.toMatchObject({
+      code: "report_wait_timeout",
+      retryable: true,
+      status: null
+    });
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await assertion;
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves caller cancellation during an in-flight status request", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async (_input, init) =>
+      waitForAbort(init?.signal)
+    );
+    const client = new Vehicles({ apiKey: API_KEY, fetch });
+    const controller = new AbortController();
+
+    const outcome = client.historyReports.waitForResult(REPORT_ID, {
+      maxWaitMs: 10_000,
+      signal: controller.signal
+    });
+    controller.abort();
+
+    await expect(outcome).rejects.toMatchObject({
+      code: "request_aborted",
+      retryable: false,
+      status: null
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("times out locally without making an extra request", async () => {

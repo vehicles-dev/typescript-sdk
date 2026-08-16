@@ -27,7 +27,12 @@ const vehicles = new Vehicles({
 });
 
 const decoded = await vehicles.decodeVin("1HGCM82633A004352");
-console.log(decoded.vehicle);
+console.log({
+  make: decoded.vehicle["make"],
+  model: decoded.vehicle["model"],
+  trim: decoded.vehicle["trim"],
+  year: decoded.vehicle["year"]
+});
 
 const value = await vehicles.getMarketValue({
   make: "Honda",
@@ -40,7 +45,9 @@ console.log(value.estimateUsd);
 ```
 
 The constructor rejects a missing or blank key before making a request. By default it calls
-`https://api.vehicles.dev` with a 30-second timeout:
+`https://api.vehicles.dev` with a 30-second timeout. Custom remote base URLs must use HTTPS;
+plaintext HTTP is accepted only for explicit local development on `localhost`, `127.0.0.0/8`, or
+`::1`:
 
 ```ts
 const vehicles = new Vehicles({
@@ -76,17 +83,15 @@ Arguments use idiomatic camelCase; the SDK maps them to the API's query names.
 | `getRecalls(vin)`                    | `GET /v1/vehicles/recalls/{vin}`               |
 | `getPhotos(vin)`                     | `GET /v1/vehicles/photos/{vin}`                |
 | `searchListings(params?)`            | `GET /v1/vehicles/listings`                    |
-| `getListingHistory(vin)`             | `GET /v1/vehicles/history/{vin}`               |
 | `getMarketValue(params)`             | `GET /v1/vehicles/market-value`                |
 | `getDepreciation(params)`            | `GET /v1/vehicles/depreciation`                |
 | `getOwnershipCosts(params)`          | `GET /v1/vehicles/ownership-costs`             |
-| `getCompositeReport(vin, params?)`   | `GET /v1/vehicles/report/{vin}`                |
 | `historyReports.create(params)`      | `POST /v1/vehicles/history-reports`            |
 | `historyReports.retrySubmission(id)` | `POST /v1/vehicles/history-reports/{id}/retry` |
 | `historyReports.getStatus(id)`       | `GET /v1/vehicles/history-reports/{id}`        |
 | `historyReports.getResult(id)`       | `GET /v1/vehicles/history-reports/{id}/result` |
 
-VIN path values are trimmed, uppercased, and percent-encoded. The synchronous data endpoints accept
+VIN path values are trimmed, uppercased, and percent-encoded. The immediate-response data endpoints accept
 the platform's 1–32 character VIN contract; they intentionally do not apply one stricter validator
 to every operation.
 
@@ -104,7 +109,7 @@ const listings = await vehicles.searchListings({
 });
 ```
 
-### Depreciation, ownership costs, and composite reports
+### Depreciation and ownership costs
 
 ```ts
 const depreciation = await vehicles.getDepreciation({
@@ -116,11 +121,6 @@ const ownership = await vehicles.getOwnershipCosts({
   make: "Toyota",
   model: "Camry",
   year: 2024
-});
-
-const report = await vehicles.getCompositeReport("4T1G11AK5RU123456", {
-  miles: 18_000,
-  state: "CA"
 });
 ```
 
@@ -144,8 +144,12 @@ const result = await vehicles.historyReports.waitForResult(created.id, {
   maxWaitMs: 5 * 60_000,
   signal: AbortSignal.timeout(5 * 60_000)
 });
-console.log(result.report);
+console.log(Object.keys(result.report).sort());
 ```
+
+History reports can contain private ownership, title, accident, theft, and sale data. Do not log the
+raw report, VIN, report ID, or full error object. Persist and display only the fields your application
+needs, and keep operational logs to an explicit allowlist.
 
 `waitForResult` polls read-only status at the server's `Retry-After` cadence and fetches the result
 only after the report is `completed` with `hasResult: true`. It stops on `action_required`, an invalid
@@ -169,11 +173,14 @@ All API, response, and transport failures reject with `VehiclesError`:
 import { VehiclesError } from "@vehicles-dev/sdk";
 
 try {
-  await vehicles.getListingHistory("1HGCM82633A004352");
+  await vehicles.getRecalls("1HGCM82633A004352");
 } catch (error) {
   if (error instanceof VehiclesError) {
-    console.error(error.status, error.code, error.detail, error.requestId);
-    console.error(error.retryable, error.retryAfterSeconds, error.invalidParams);
+    console.error("vehicles.dev request failed", {
+      code: error.code,
+      retryable: error.retryable,
+      status: error.status
+    });
   }
 }
 ```
@@ -181,7 +188,9 @@ try {
 The error exposes `status`, `code`, `detail`, `type`, `requestId`, `retryable`, `invalidParams`, and
 `retryAfterSeconds`. HTTP failures parse the API's RFC 9457 problem document. Timeouts, network
 failures, unreadable bodies, and invalid success JSON receive stable local codes. The configured API
-key is redacted from every emitted error string.
+key is redacted from every emitted error string. Error details and invalid parameters may still carry
+private request context, so do not log a raw `VehiclesError`; select only the operational fields your
+logging policy permits.
 
 ## Development
 
@@ -189,6 +198,7 @@ key is redacted from every emitted error string.
 pnpm install --frozen-lockfile
 pnpm check
 pnpm pack --dry-run
+pnpm smoke:git-install
 ```
 
 Tests use injected `fetch` implementations and never call production or make billable requests.

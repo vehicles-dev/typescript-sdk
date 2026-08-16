@@ -48,7 +48,9 @@
     "check": "pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepack": "pnpm build",
+    "prepare": "tsc -p tsconfig.build.json",
+    "prepack": "tsc -p tsconfig.build.json",
+    "smoke:git-install": "node ./scripts/smoke-git-install.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json"

@@ -13,11 +13,9 @@ describe("operation mapping", () => {
     await client.getRecalls(VIN);
     await client.getPhotos("ab/c");
     await client.searchListings();
-    await client.getListingHistory(VIN);
     await client.getMarketValue({ make: "Toyota", model: "Camry", year: 2021 });
     await client.getDepreciation({ make: "Toyota", model: "Camry" });
     await client.getOwnershipCosts({ make: "Toyota", model: "Camry", year: 2021 });
-    await client.getCompositeReport(VIN);
     await client.historyReports.create({
       idempotencyKey: "22222222-2222-4222-8222-222222222222",
       vin: VIN
@@ -32,11 +30,9 @@ describe("operation mapping", () => {
       ["GET", `/v1/vehicles/recalls/${VIN}`],
       ["GET", "/v1/vehicles/photos/AB%2FC"],
       ["GET", "/v1/vehicles/listings"],
-      ["GET", `/v1/vehicles/history/${VIN}`],
       ["GET", "/v1/vehicles/market-value"],
       ["GET", "/v1/vehicles/depreciation"],
       ["GET", "/v1/vehicles/ownership-costs"],
-      ["GET", `/v1/vehicles/report/${VIN}`],
       ["POST", "/v1/vehicles/history-reports"],
       ["POST", `/v1/vehicles/history-reports/${REPORT_ID}/retry`],
       ["GET", `/v1/vehicles/history-reports/${REPORT_ID}`],
@@ -102,24 +98,14 @@ describe("operation mapping", () => {
     });
   });
 
-  it("omits the composite-report query delimiter when no filters are supplied", async () => {
-    const stub = successfulFetch({});
-    const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
+  it.each(["", " ", "x".repeat(33)])(
+    "rejects an invalid immediate-response VIN %j locally",
+    (vin) => {
+      const stub = successfulFetch({});
+      const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
 
-    await client.getCompositeReport(VIN);
-    await client.getCompositeReport(VIN, { miles: 0, state: "CT" });
-
-    expect(stub.calls[0]?.url).toBe(`https://api.vehicles.dev/v1/vehicles/report/${VIN}`);
-    expect(stub.calls[1]?.url).toBe(
-      `https://api.vehicles.dev/v1/vehicles/report/${VIN}?miles=0&state=CT`
-    );
-  });
-
-  it.each(["", " ", "x".repeat(33)])("rejects an invalid synchronous VIN %j locally", (vin) => {
-    const stub = successfulFetch({});
-    const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
-
-    expect(() => client.decodeVin(vin)).toThrow(/VIN must contain between 1 and 32 characters/u);
-    expect(stub.calls).toHaveLength(0);
-  });
+      expect(() => client.decodeVin(vin)).toThrow(/VIN must contain between 1 and 32 characters/u);
+      expect(stub.calls).toHaveLength(0);
+    }
+  );
 });
