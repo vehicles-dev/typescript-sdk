@@ -9,9 +9,13 @@ the global `fetch` available in Node.js 22 and newer.
 
 ## Install
 
+The npm release is not enabled yet. Install the tagged starter directly from GitHub:
+
 ```sh
-pnpm add @vehicles-dev/sdk
+pnpm add "github:vehicles-dev/typescript-sdk#v0.1.0"
 ```
+
+Once the npm package is published, the install command will be `pnpm add @vehicles-dev/sdk`.
 
 ## Quick start
 
