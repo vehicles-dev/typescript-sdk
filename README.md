@@ -12,7 +12,7 @@ the global `fetch` available in Node.js 22 and newer.
 The npm release is not enabled yet. Install the tagged starter directly from GitHub:
 
 ```sh
-pnpm add "github:vehicles-dev/typescript-sdk#v0.1.0"
+pnpm add "github:vehicles-dev/typescript-sdk#v0.1.1"
 ```
 
 Once the npm package is published, the install command will be `pnpm add @vehicles-dev/sdk`.
@@ -91,9 +91,9 @@ Arguments use idiomatic camelCase; the SDK maps them to the API's query names.
 | `historyReports.getStatus(id)`       | `GET /v1/vehicles/history-reports/{id}`        |
 | `historyReports.getResult(id)`       | `GET /v1/vehicles/history-reports/{id}/result` |
 
-VIN path values are trimmed, uppercased, and percent-encoded. The immediate-response data endpoints accept
-the platform's 1–32 character VIN contract; they intentionally do not apply one stricter validator
-to every operation.
+VIN path values are trimmed, uppercased, validated, and percent-encoded. Immediate-response data
+endpoints require exactly 17 VIN-safe characters matching
+`[A-HJ-NPR-Za-hj-npr-z0-9]{17}`; the letters I, O, and Q are not allowed.
 
 ### Listings
 

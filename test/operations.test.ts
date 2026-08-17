@@ -11,7 +11,7 @@ describe("operation mapping", () => {
     await client.decodeVin(` ${VIN.toLowerCase()} `);
     await client.getSpecifications(VIN);
     await client.getRecalls(VIN);
-    await client.getPhotos("ab/c");
+    await client.getPhotos(VIN);
     await client.searchListings();
     await client.getMarketValue({ make: "Toyota", model: "Camry", year: 2021 });
     await client.getDepreciation({ make: "Toyota", model: "Camry" });
@@ -28,7 +28,7 @@ describe("operation mapping", () => {
       ["GET", `/v1/vehicles/vin/${VIN}`],
       ["GET", `/v1/vehicles/specifications/${VIN}`],
       ["GET", `/v1/vehicles/recalls/${VIN}`],
-      ["GET", "/v1/vehicles/photos/AB%2FC"],
+      ["GET", `/v1/vehicles/photos/${VIN}`],
       ["GET", "/v1/vehicles/listings"],
       ["GET", "/v1/vehicles/market-value"],
       ["GET", "/v1/vehicles/depreciation"],
@@ -98,14 +98,26 @@ describe("operation mapping", () => {
     });
   });
 
-  it.each(["", " ", "x".repeat(33)])(
-    "rejects an invalid immediate-response VIN %j locally",
-    (vin) => {
-      const stub = successfulFetch({});
-      const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
+  it("trims and canonicalizes a lowercase valid VIN", async () => {
+    const stub = successfulFetch({});
+    const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
 
-      expect(() => client.decodeVin(vin)).toThrow(/VIN must contain between 1 and 32 characters/u);
-      expect(stub.calls).toHaveLength(0);
-    }
-  );
+    await client.decodeVin(` ${VIN.toLowerCase()} `);
+
+    expect(new URL(stub.calls[0]?.url ?? "").pathname).toBe(`/v1/vehicles/vin/${VIN}`);
+  });
+
+  it.each([
+    "A".repeat(16),
+    "A".repeat(18),
+    "1HGCM826I3A004352",
+    "1HGCM826O3A004352",
+    "1HGCM826Q3A004352"
+  ])("rejects an invalid immediate-response VIN %j locally", (vin) => {
+    const stub = successfulFetch({});
+    const client = new Vehicles({ apiKey: API_KEY, fetch: stub.fetch });
+
+    expect(() => client.decodeVin(vin)).toThrow(/VIN must be exactly 17 characters/u);
+    expect(stub.calls).toHaveLength(0);
+  });
 });

@@ -1,6 +1,6 @@
 {
   "name": "@vehicles-dev/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Official server-side TypeScript SDK for the vehicles.dev API.",
   "keywords": [
     "vehicles",
