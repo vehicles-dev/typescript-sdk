@@ -91,7 +91,7 @@ describe("request transport", () => {
     expect(init).toMatchObject({ method: "GET", redirect: "manual" });
     expect(headers.get("authorization")).toBe(`Bearer ${API_KEY}`);
     expect(headers.get("accept")).toBe("application/json");
-    expect(headers.get("user-agent")).toBe("@vehicles-dev/sdk/0.1.0");
+    expect(headers.get("user-agent")).toBe("@vehicles-dev/sdk/0.1.1");
     expect(headers.has("content-type")).toBe(false);
     expect(headers.has("origin")).toBe(false);
     expect(headers.has("cookie")).toBe(false);

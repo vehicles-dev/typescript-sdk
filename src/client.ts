@@ -26,8 +26,9 @@ import type {
 const DEFAULT_BASE_URL = "https://api.vehicles.dev";
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_WAIT_MS = 5 * 60_000;
-const USER_AGENT = "@vehicles-dev/sdk/0.1.0";
+const USER_AGENT = "@vehicles-dev/sdk/0.1.1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const VIN_PATTERN = /^[A-HJ-NPR-Za-hj-npr-z0-9]{17}$/u;
 
 type QueryValue = boolean | number | string | undefined;
 
@@ -125,11 +126,13 @@ function monotonicNow(): number {
 }
 
 function normalizeVin(vin: string): string {
-  const normalized = vin.trim().toUpperCase();
-  if (normalized.length < 1 || normalized.length > 32) {
-    throw new TypeError("VIN must contain between 1 and 32 characters");
+  const trimmed = vin.trim();
+  if (!VIN_PATTERN.test(trimmed)) {
+    throw new TypeError(
+      "VIN must be exactly 17 characters using A-H, J-N, P, R-Z, and 0-9 (I, O, and Q are not allowed)"
+    );
   }
-  return normalized;
+  return trimmed.toUpperCase();
 }
 
 function normalizeHistoryVin(vin: string): string {
